@@ -134,44 +134,47 @@ def load_dataset_stream(filepath, split_token="<|endoftext|>"):
 @timed
 def merge_naive(
     tokens: list[bytes],
-    vocab: dict[int, bytes],
+    vocab: dict,
     vocab_size: int,
-    max_merges: None | int,
+    max_merges: int = None,
 ):
+
+    merges = []
+    next_token_id = len(vocab)
     num_merges = 0
-    next_token_id = len(vocab) 
+
     while len(vocab) < vocab_size:
         pair_counts = calc_pair_counts_naive(tokens)
         if not pair_counts:
             break
 
-        # Find most frequent pair (lexicographically greatest on ties)
         most_freq_pair = max(pair_counts, key=lambda p: (pair_counts[p], decode_token(p)))
 
         vocab[most_freq_pair] = next_token_id
         next_token_id += 1
+
+        merges.append(most_freq_pair)
 
         new_tokens = []
         for t in tokens:
             new_t = []
             i = 0
             while i < len(t):
-                if i < (len(t) - 1) and (t[i], t[i + 1]) == most_freq_pair:
+                if i < len(t) - 1 and (t[i], t[i + 1]) == most_freq_pair:
                     new_t.append(most_freq_pair)
                     i += 2
                 else:
                     new_t.append(t[i])
                     i += 1
-
             new_tokens.append(new_t)
+
         tokens = new_tokens
 
-        # To avoid eternal loop in some cases
         num_merges += 1
         if max_merges is not None and num_merges >= max_merges:
-            return tokens
+            break
 
-    return tokens, merges
+    return tokens, vocab, merges
 
 
 @timed
