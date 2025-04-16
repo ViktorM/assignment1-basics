@@ -588,4 +588,26 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    from cs336_basics.tokenization_utils import train_bpe
+
+    vocab, merges = train_bpe(
+        input_path=str(input_path),
+        vocab_size=vocab_size,
+        special_tokens=special_tokens,
+        **kwargs
+    )
+
+    # Convert vocab to dict[int, bytes] (token_id -> token_bytes)
+    id_to_token = {}
+    for token, idx in vocab.items():
+        # token can be bytes or tuple; decode_token handles both
+        if isinstance(token, bytes):
+            id_to_token[idx] = token
+        elif isinstance(token, str):
+            id_to_token[idx] = token.encode("utf-8")
+        else:
+            # For tuple tokens, join recursively and encode
+            from cs336_basics.tokenization_utils import decode_token
+            id_to_token[idx] = decode_token(token).encode("utf-8")
+
+    return id_to_token, merges
