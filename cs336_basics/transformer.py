@@ -1,15 +1,18 @@
 import torch
 import torch.nn as nn
-import einops
 from einops import einsum
+
 
 class Linear(nn.Module):
     def __init__(self, in_features, out_features, device=None, dtype=None):
         '''
-        in_features: int final dimension of the input
-        out_features: int final dimension of the output
-        device: torch.device | None = None Device to store the parameters on
-        dtype: torch.dtype | None = None Data type of the parameters
+        Args:
+            in_features: int final dimension of the input
+            out_features: int final dimension of the output
+            device: torch.device | None = None Device to store the parameters on
+            dtype: torch.dtype | None = None Data type of the parameters
+        Returns:
+            None
         '''
         super().__init__()
         self.in_features = in_features
@@ -17,13 +20,23 @@ class Linear(nn.Module):
         self.device = device
         self.dtype = dtype
 
-        self.weight = nn.Parameter(torch.empty(out_features, in_features))
+        self.weight = nn.Parameter(
+            torch.empty(out_features, in_features, device=device, dtype=dtype)
+            )
 
         self.init_parameters()
 
     def init_parameters(self, std: float = 0.02):
         # Initialize the weights with a truncated normal distribution
         torch.nn.init.trunc_normal_(self.weight, std=std)
+
+    def load_parameters(self, weights: torch.Tensor):
+        # Ensure shape matches
+        assert weights.shape == self.weight.shape, \
+            f"Expected weights shape {self.weight.shape}, but got {weights.shape}."
+
+        with torch.no_grad():
+            self.weight.copy_(weights)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Perform a matrix multiplication of the input with the transposed weights
@@ -32,8 +45,8 @@ class Linear(nn.Module):
         # x: (batch, in_feat)
         # self.weight: (out_feat, in_feat)
         # y (batch, out_feat)
-        # y = x @ self.weight.T
-        y = einsum(x, self.weight, 'batch in_feat, out_feat in_feat -> batch out_feat')
+        # y = x @ self.weights.T
+        y = einsum(x, self.weight, '... in_feat, out_feat in_feat -> ... out_feat')
 
         return y
 
@@ -41,10 +54,11 @@ class Linear(nn.Module):
 class Embedding(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, device=None, dtype=None):
         '''
-        num_embeddings: int Size of the vocabulary
-        embedding_dim: int Dimension of the embedding vectors, i.e., dmodel
-        device: torch.device | None = None Device to store the parameters on
-        dtype: torch.dtype | None = None Data type of the parameters
+        Args:
+            num_embeddings: int Size of the vocabulary
+            embedding_dim: int Dimension of the embedding vectors, i.e., dmodel
+            device: torch.device | None = None Device to store the parameters on
+            dtype: torch.dtype | None = None Data type of the parameters
         '''
         super().__init__()
         self.num_embeddings = num_embeddings
