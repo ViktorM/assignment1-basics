@@ -87,6 +87,7 @@ def run_swiglu(
     Returns:
         Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
     """
+    from cs336_basics.transformer import SwiGLU
     # Example:
     # If your state dict keys match, you can use `load_state_dict()`
     # swiglu.load_state_dict(weights)
@@ -94,7 +95,11 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+
+    swiglu = SwiGLU(d_model, d_ff)
+    swiglu.load_state_dict({"W_1": w1_weight, "W_2": w2_weight, "W_3": w3_weight})
+
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -115,7 +120,9 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    from cs336_basics.transformer import scaled_dot_product_attention
+
+    return scaled_dot_product_attention(Q, K, V, mask)
 
 
 def run_multihead_self_attention(
@@ -211,7 +218,11 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    from cs336_basics.transformer import RotaryPositionalEmbedding
+
+    rope = RotaryPositionalEmbedding(theta, d_k, max_seq_len)
+
+    return rope(in_query_or_key, token_positions)
 
 
 def run_transformer_block(
@@ -312,7 +323,7 @@ def run_transformer_lm(
             evenly divisible by `num_heads`.
         d_ff (int): Dimensionality of the feed-forward inner layer (section 3.3).
         rope_theta (float): The RoPE $\Theta$ parameter.
-        weights (dict[str, Tensor]): 
+        weights (dict[str, Tensor]):
             State dict of our reference implementation. {num_layers} refers to an
             integer between `0` and `num_layers - 1` (the layer index).
             The keys of this dictionary are:
@@ -408,7 +419,9 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    from cs336_basics.transformer import Swish
+
+    return Swish(in_features)
 
 
 def run_get_batch(
@@ -447,7 +460,9 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    from cs336_basics.transformer import softmax
+
+    return softmax(in_features, dim)
 
 
 def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]) -> Float[Tensor, ""]:
