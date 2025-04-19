@@ -624,6 +624,7 @@ def run_train_bpe(
         input_path=str(input_path),
         vocab_size=vocab_size,
         special_tokens=special_tokens,
+        use_naive_merge=True,
         **kwargs
     )
 
