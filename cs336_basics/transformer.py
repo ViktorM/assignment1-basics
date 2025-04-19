@@ -54,9 +54,11 @@ class Linear(nn.Module):
 class Embedding(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, device=None, dtype=None):
         '''
+        * initialize your embedding matrix as a nn.Parameter
+        * store the embedding matrix with the d_model being the final dimension
         Args:
             num_embeddings: int Size of the vocabulary
-            embedding_dim: int Dimension of the embedding vectors, i.e., dmodel
+            embedding_dim: int Dimension of the embedding vectors, i.e., d_model
             device: torch.device | None = None Device to store the parameters on
             dtype: torch.dtype | None = None Data type of the parameters
         '''
@@ -66,8 +68,67 @@ class Embedding(nn.Module):
         self.device = device
         self.dtype = dtype
 
+        self.embedding = nn.Parameter(
+            torch.empty(num_embeddings, embedding_dim, device=device, dtype=dtype)
+            )
+
+        self.init_parameters()
+
+    def init_parameters(self, std: float = 0.02):
+        # Initialize the weights with a truncated normal distribution
+        torch.nn.init.trunc_normal_(self.embedding, std=std)
+
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-        pass
+        '''
+        The forward method should select the embedding vector for each token ID 
+        by indexing into an embedding matrix of shape (vocab_size, d_model) using 
+        a torch.LongTensor of token IDs with shape (batch_size, sequence_length).
+        Args:
+            token_ids: (batch, seq_len)
+        Returns:
+            embedding: (batch, seq_len, d_model)
+        '''
+        return self.embedding[token_ids]
+
+
+class RMSNorm(nn.Module):
+    def __init__(self, d_model: int, eps: float = 1e-5, device=None, dtype=None):
+        '''
+        Construct the RMSNorm module. This function should accept the following parameters:
+
+        Args:
+            d_model: int Hidden dimension of the model
+            eps: float = 1e-5 Epsilon value for numerical stability
+            device: torch.device | None = None Device to store the parameters on
+            dtype: torch.dtype | None = None Data type of the parameters
+        '''
+        super().__init__()
+        self.d_model = d_model
+        self.eps = eps
+        self.device = device
+        self.dtype = dtype
+
+        # Should we init it?
+        self.g = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        '''
+        Process an input tensor of shape (batch_size, sequence_length, d_model) 
+        and return a tensor of the same shape. Remember to upcast your input to 
+        torch.float32 before performing the normalization (and later downcast to 
+        the original dtype), as described above.
+        Args:
+            x: (batch, seq_len, d_model)
+        Returns:
+            x_normed: (batch, seq_len, d_model)
+        '''
+        in_dtype = x.dtype
+        x = x.to(torch.float32)
+        rms = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
+        x_norm = x / rms * self.g
+        x.norm = x_norm.to(in_dtype)
+
+        return x_norm
 
 
 class RoPE(nn.Module):
