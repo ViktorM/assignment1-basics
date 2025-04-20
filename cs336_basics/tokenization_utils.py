@@ -111,44 +111,51 @@ def load_dataset_stream(filepath, split_token="<|endoftext|>"):
 
 
 def find_chunk_boundaries(
-    file: BinaryIO,
-    desired_num_chunks: int,
+    file: BinaryIO, 
+    desired_num_chunks: int, 
     split_special_token: bytes
 ) -> list[int]:
     """
-    Determines chunk boundaries by searching for `split_special_token`
-    near uniformly spaced offsets in the file.
+    Chunk the file into parts that can be counted independently.
+    May return fewer chunks if the boundaries end up overlapping.
     """
+    assert isinstance(split_special_token, bytes), (
+        "Must represent special token as a bytestring"
+    )
+
+    # Get total file size in bytes
     file.seek(0, os.SEEK_END)
     file_size = file.tell()
     file.seek(0)
 
-    if desired_num_chunks <= 1 or file_size == 0:
-        # Only one chunk or empty file => trivial
-        return [0, file_size]
-
     chunk_size = file_size // desired_num_chunks
+
+    # Initial guesses for chunk boundary locations, uniformly spaced
+    # Chunks start on previous index, don't include last index
     chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
     chunk_boundaries[-1] = file_size
 
-    mini_chunk_size = 4096
+    mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
+
     for bi in range(1, len(chunk_boundaries) - 1):
         initial_position = chunk_boundaries[bi]
-        file.seek(initial_position)
+        file.seek(initial_position)  # Start at boundary guess
         while True:
-            mini_chunk = file.read(mini_chunk_size)
-            if not mini_chunk:  # EOF
+            mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
+
+            # If EOF, this boundary should be at the end of the file
+            if mini_chunk == b"":
                 chunk_boundaries[bi] = file_size
                 break
 
+            # Find the special token in the mini chunk
             found_at = mini_chunk.find(split_special_token)
             if found_at != -1:
                 chunk_boundaries[bi] = initial_position + found_at
                 break
-
             initial_position += mini_chunk_size
 
-    # Remove duplicates and sort
+    # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
 
@@ -213,11 +220,22 @@ def merge_naive(
             break
 
         # pick the most frequent pair
-        best_pair = max(pair_counts.keys(), key=lambda p: (
-            pair_counts[p],
-            decode_token_strict(p[0], vocab) +
-            decode_token_strict(p[1], vocab)
-            )
+        #best_pair = max(pair_counts.keys(), key=lambda p: (
+        #    pair_counts[p],
+        #    decode_token_strict(p[0], vocab) +
+        #    decode_token_strict(p[1], vocab)
+        #    )
+        #)
+
+        # best_pair = max(pair_counts.keys(), key=lambda p: (
+        #     pair_counts[p],
+        #     vocab[p[0]].decode('utf-8', errors='replace') +
+        #     vocab[p[1]].decode('utf-8', errors='replace')
+        # ))
+
+        best_pair = min(
+            pair_counts.keys(),
+            key=lambda p: (-pair_counts[p], vocab[p[0]] + vocab[p[1]])
         )
 
         best_pair_count = pair_counts[best_pair]
@@ -255,6 +273,70 @@ def merge_naive(
     return tokens, vocab, merges
 
 
+@timed
+def merge_naive2(
+    tokens: list[list[int]],
+    vocab: dict[int, bytes],
+    vocab_size: int,
+    special_token_ids: set[int],
+    max_merges: int = None,
+):
+    merges = []
+    next_token_id = max(vocab.keys()) + 1
+    num_merges = 0
+
+    while len(vocab) < vocab_size:
+        pair_counts = defaultdict(int)
+        # Recompute pair occurrences each iteration
+        for seq in tokens:
+            for i in range(len(seq) - 1):
+                pair_counts[(seq[i], seq[i + 1])] += 1
+
+        # skip pairs with special tokens
+        valid_pairs = [
+            p for p in pair_counts if p[0] not in special_token_ids and p[1] not in special_token_ids
+        ]
+
+        if not valid_pairs:
+            break
+
+        best_pair = min(valid_pairs, key=lambda p: (
+            -pair_counts[p],
+            decode_token_strict(p[0], vocab) + decode_token_strict(p[1], vocab)
+        ))
+
+        best_pair_count = pair_counts[best_pair]
+        if best_pair_count < 1:
+            break
+
+        merged_bytes = vocab[best_pair[0]] + vocab[best_pair[1]]
+        vocab[next_token_id] = merged_bytes
+        merges.append((vocab[best_pair[0]], vocab[best_pair[1]]))
+
+        # replace occurrences
+        new_tokens = []
+        for seq in tokens:
+            i = 0
+            merged_seq = []
+            while i < len(seq):
+                if i < len(seq) - 1 and (seq[i], seq[i + 1]) == best_pair:
+                    merged_seq.append(next_token_id)
+                    i += 2
+                else:
+                    merged_seq.append(seq[i])
+                    i += 1
+            new_tokens.append(merged_seq)
+
+        tokens = new_tokens
+        next_token_id += 1
+        num_merges += 1
+
+        if max_merges and num_merges >= max_merges:
+            break
+
+    return tokens, vocab, merges
+
+
 # Iver bytes trick for tie-breaking
 def invert_bytes(b: bytes) -> bytes:
     # 255 - x in each position
@@ -273,6 +355,14 @@ class ReverseBytes:
         return self.b == other.b
     def __repr__(self):
         return repr(self.b)
+
+
+class Rev:
+    def __init__(self, b: bytes): self.b = b
+    def __lt__(self, o):     return self.b > o.b
+    def __eq__(self, o):     return self.b == o.b
+    def __repr__(self):      return repr(self.b)
+
 
 
 def tiebreak_value(a_id: int, b_id: int, vocab: dict[int, bytes]) -> tuple[str, str]:
@@ -493,6 +583,7 @@ def train_bpe(
 
     # Add 256 single-byte tokens
     next_id = 0
+
     for i in range(256):
         id_to_bytes[next_id] = bytes([i])
         next_id += 1
@@ -500,12 +591,13 @@ def train_bpe(
     # Add special tokens as distinct IDs
     special_token_ids = set()
     for sp in special_tokens:
-        # We'll store them as bytes too, to keep merges consistent. 
-        # TODO: double-check is it should be as str in the final vocab, do it. 
+        # We'll store them as bytes too, to keep merges consistent.
+        # TODO: double-check is it should be as str in the final vocab, do it.
         # The test harness is typically OK with them as bytes or str.
         id_to_bytes[next_id] = sp.encode("utf-8")
         special_token_ids.add(next_id)
         next_id += 1
+
 
     # Find chunk boundaries for parallel pre-tokenization
     with open(input_path, "rb") as f:

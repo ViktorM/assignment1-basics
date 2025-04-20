@@ -1,5 +1,11 @@
 ## Assignment 1
 
+### Summary
+
+* Implemented required pieces of the bpe_tokenizer, including train_bpe() functions and a Tokenizer classes. Some tests are still falling due to different order of merges in heap-based optimized implementation.
+
+* Implemented transformer key components.
+
 ---
 
 ### Problem (unicode1): Understanding Unicode (1 point)
